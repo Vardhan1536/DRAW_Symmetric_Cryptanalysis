@@ -8,9 +8,9 @@ This repository contains the official implementation of the DRAW framework appli
 
 This module implements a Two-Phase Grover's search approach that compiles the classical cryptography into weighted SAT clauses (WCNF). It splits the physical quantum search into heavy and light constraints to optimize hardware resources.
 
-- **`two_phase_grovers/two_phase_grovers.py`**: The unified script that dynamically calculates surviving keys and optimal iteration counts via mathematically exact classical Boolean validation (bypassing slow/memory-intensive Qiskit Aer simulators).
-- **`two_phase_grovers/gate_depth_analysis_new.py`**: A theoretical analysis script that explicitly constructs physical quantum circuits and uses Qiskit's compiler to extract the strict logical circuit depths and gate counts for a single-phase forward pass.
-- **`two_phase_grovers/Reversible_Circuit/`**: Contains the low-level quantum reversible circuit components for S-AES (like the IO-based S-Box and MixColumns) and hardware execution scripts.
+- **`two_phase_grovers/two_phase_grovers.py`**: The unified script that dynamically calculates surviving keys and optimal iteration counts via mathematically exact classical Boolean validation. *(Note: We explicitly bypass the Qiskit Aer simulator because executing a 51+ qubit uncompressed oracle would exceed memory limits and crash. Instead, this script uses mathematically exact classical Boolean validation to scale the evaluation.)*
+- **`two_phase_grovers/gate_depth_analysis_new.py`**: A theoretical analysis script that explicitly constructs physical quantum circuits and uses Qiskit's compiler to extract the logical circuit depths and gate counts for forward pass only.
+- **`two_phase_grovers/Reversible_Circuit/`**: Contains the quantum reversible circuit components for S-AES (like the IO-based S-Box and MixColumns) and hardware execution scripts.
 
 **How to Run:**
 ```bash
@@ -25,7 +25,7 @@ python two_phase_grovers/gate_depth_analysis_new.py
 
 This module implements a Differential-Informed Simulated Annealing framework. It uses classical Differential Cryptanalysis (DC) to compute log-odds ratio biases, which are injected into a Hybrid Bounded-Penalty QUBO model.
 
-- **`dc_guided_annealing/hybrid_qubo_compiler.py`**: The SAT-to-QUBO compilation engine. It transforms the Clause-Weight Mobility Constrained (CWMC) logic into a Hybrid Bounded-Penalty QUBO model.
+- **`dc_guided_annealing/hybrid_qubo_compiler.py`**: Does the SAT-to-QUBO compilation. It transforms the DRAW logic into a Hybrid Bounded-Penalty QUBO model.
 - **`dc_guided_annealing/dc_annealing.py`**: The execution script. It computes DC biases from the cipher's MixColumns operation and executes a Two-Phase Annealing Strategy (Phase 1: DC-Biased Guided Descent, Phase 2: Pure QUBO Refinement) to recover the master key.
 
 **How to Run:**
@@ -35,9 +35,9 @@ python dc_guided_annealing/dc_annealing.py
 
 ---
 
-## 3. Variational Quantum Algorithms (VQA) / QAOA (`VQA/`)
+## 3. Variational Quantum Algorithms (VQA) 
 
-This module implements the DRAW-VQA framework, a physics-informed ansatz optimization strategy to navigate the CWMC energy landscape using a 3-stage Covariance Matrix Adaptation Evolution Strategy (CMA-ES).
+This module implements the DRAW-VQA framework, a physics-informed ansatz optimization strategy to navigate the DRAW energy landscape using a 3-stage Covariance Matrix Adaptation Evolution Strategy (CMA-ES).
 
 - **`VQA/landscape_geometry_experiments.py`**: Computes the classical influence and pairwise synergy metrics required to construct the $U_{\text{mix}}$, $U_{\text{bias}}$, and $U_{\text{syn}}$ ansatz operators.
 - **`VQA/draw_vqa.py`**: The primary execution script. It constructs the full 20-layer ansatz in Qiskit (including the Fast Walsh-Hadamard transform for $U_{\text{cost}}$) and executes the CMA-ES optimization.
