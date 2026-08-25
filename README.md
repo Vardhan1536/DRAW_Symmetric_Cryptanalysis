@@ -53,8 +53,8 @@ w(clause_i) = |{ ciphertext bits reachable from vars(clause_i) }|
 | SubBytes (S-Box) | Massacci–Marraro minimized prime implicants [[1]](#references) | 23 clauses per 4-bit S-Box, lengths 3–5 |
 | AddRoundKey / XOR | Exhaustive 2^k parity clauses | Exact linear encoding |
 | ShiftRows | Variable re-indexing only | No new clauses needed |
-| **Key Schedule** | XOR + S-Box clauses | Highest DRAW weight (avg 14.25, median **16.0**) — [see detailed encoding →](SAT_formulation/ENCODING.md#1-key-schedule-cnf-encoding) |
-| **MixColumns** | GF(2⁴) mult-by-4 encoded as XOR clauses | Triggers the weight jump: Round 1 max leaps to **16.0** vs Round 2 max of **1.0** — [see detailed encoding →](SAT_formulation/ENCODING.md#2-mixcolumns-cnf-encoding) |
+| **Key Schedule** | XOR + S-Box clauses | Highest DRAW weight (avg 14.25, median **16.0**) — [see detailed encoding →](SAT_formulation/Encoding.md#1-key-schedule-cnf-encoding) |
+| **MixColumns** | GF(2⁴) mult-by-4 encoded as XOR clauses | Triggers the weight jump: Round 1 max leaps to **16.0** vs Round 2 max of **1.0** — [see detailed encoding →](SAT_formulation/Encoding.md#2-mixcolumns-cnf-encoding) |
 | Boundary (PT/CT) | Unit clauses locking observed bits | Weight 1.0 — isolated, no diffusion |
 
 ---
