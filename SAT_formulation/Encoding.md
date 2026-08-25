@@ -1,7 +1,6 @@
 # Key Schedule and MixColumns CNF Encodings (S-AES)
 
-This document derives the CNF clause structure for the Key Schedule and MixColumns layers of Simplified AES (S-AES) as encoded in the SAT formulation (Massacci paradigm).
-
+This document derives the CNF clause structure for the Key Schedule and MixColumns layers of Simplified AES (S-AES).
 ---
 
 ## Key Schedule Encoding
