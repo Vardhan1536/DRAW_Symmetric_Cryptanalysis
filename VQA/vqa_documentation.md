@@ -6,7 +6,7 @@ This directory contains the code implementation of the DRAW-VQA framework (Varia
 
 - **`landscape_geometry_experiments.py`**: Computes the classical influence $I(k_i)$ and pairwise synergy $s_{uv}$ metrics required to construct the $U_{\text{mix}}$, $U_{\text{bias}}$, and $U_{\text{syn}}$ ansatz operators.
 - **`draw_vqa.py`**: The primary execution script. It constructs the full 20-layer ansatz in Qiskit (including the Fast Walsh-Hadamard transform for $U_{\text{cost}}$) and executes the 3-stage CMA-ES optimization to find the optimal cryptographic key.
-
+- **`vqa_results.csv`** : It contains the logs for various VQA experimental runs for 50 simulations, including the recovered rank, probability amplitude ($P(K^*)$), quantum speedup, and execution time.
 ## How to Run
 
 You can execute the VQA solver directly from the command line, providing a custom Plaintext (`--pt`) and Target Key (`--key`) in hexadecimal format:
