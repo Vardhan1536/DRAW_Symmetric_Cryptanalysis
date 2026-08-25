@@ -1,10 +1,10 @@
 # Reversible Circuit Hardware Validation Results
 
-This circuit is inspired from the work of Wang et al. [8]. To validate our architecture on actual quantum computer, we executed each sub module using free tier IBM cloud services. Table 1 compares our real device execution fidelity against the hardware baseline established by Wang et al. [8].
+This circuit is inspired from the work of Wang et al. [1]. To validate our architecture on actual quantum computer, we executed each sub module using free tier IBM cloud services. Table 1 compares our real device execution fidelity against the hardware baseline established by Wang et al. [1].
 
 **Table 1: Module-by-module hardware comparison.** 
 
-| Module | Wang et al. [8] $\mathcal{P}$ | Ours $\mathcal{P}$ | Ours SNR | $\Delta\mathcal{P}$ | SNR Gain |
+| Module | Wang et al. [1] $\mathcal{P}$ | Our $\mathcal{P}$ | Ours SNR | $\Delta\mathcal{P}$ | SNR Gain |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **XOR/ARK** | ~53% | 86.6% | 222× | +33.6 | +1.6× |
 | **MixColumn** | ~62% | 71.2% | 182× | +9.2 | +1.1× |
@@ -17,12 +17,12 @@ As demonstrated in Table 1, our framework achieves higher hardware fidelity acro
 
 ### Oracle Resource Architecture
 
-The table below shows the physical resource requirements of our proposed architecture against Wang et al. [8]. Note that these represent the resource requirements for a circuit with a single phase forward pass only (without uncomputation).
+The table below shows the physical resource requirements of our proposed architecture against Wang et al. [1]. Note that these represent the resource requirements for a circuit with a single phase forward pass only (without uncomputation).
 **Table 2: Oracle Architecture Resource Costs**
 
 | Oracle Architecture | Qubits | Toffoli (CCX) | CNOT (CX) | X gates |
 | :--- | :--- | :--- | :--- | :--- |
-| **Wang et al. [8]** | 32 | 120 | 392 | 59 |
+| **Wang et al. [1]** | 32 | 120 | 392 | 59 |
 | **Ours (Hybrid Bidirectional)** | 37 | 384 | 528 | 35 |
 
 ---
@@ -45,6 +45,10 @@ python two_phase_grovers/Reversible_Circuit/test_modular_circuit.py
 ```
 
 **File Overview:**
-- **[`Reversible_circuit.py`](file:///d:/Quantum/IITH_Cryptography/SAT/QA/Consolidation/Grovers/Github2/two_phase_grovers/Reversible_Circuit/Reversible_circuit.py)**: Defines the foundational quantum logic gates (IO block, MixColumns) for the S-AES reversible cryptography.
-- **[`saes_grover_oracle.py`](file:///d:/Quantum/IITH_Cryptography/SAT/QA/Consolidation/Grovers/Github2/two_phase_grovers/Reversible_Circuit/saes_grover_oracle.py)**: Composes the individual modules to build the complete 37-qubit Hybrid Bidirectional Oracle (shown in Table 4).
-- **[`test_modular_circuit.py`](file:///d:/Quantum/IITH_Cryptography/SAT/QA/Consolidation/Grovers/Github2/two_phase_grovers/Reversible_Circuit/test_modular_circuit.py)**: The main execution script. It submits the compiled modules to IBM quantum hardware using your API key and calculates the execution fidelity and SNR metrics (shown in Table 3).
+- **[`Reversible_circuit.py`]**: Defines the foundational quantum logic gates (IO block, MixColumns) for the S-AES reversible cryptography.
+- **[`saes_grover_oracle.py`]**: Composes the individual modules to build the complete 37-qubit Hybrid Bidirectional Oracle (shown in Table 4).
+- **[`test_modular_circuit.py`]**: The main execution script. It submits the compiled modules to IBM quantum hardware using your API key and calculates the execution fidelity and SNR metrics (shown in Table 3).
+
+### References
+[1] Zeguo Wang, Muxi Zheng, Jiawei Wu, Kai Wen, Shijie Wei, and Gui-Lu Long. "Reducing quantum resources for attacking S-AES on quantum devices," *npj Quantum Information*, 11(1):157, 2025. doi:10.1038/s41534-025-01106-w.
+
