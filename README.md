@@ -1,9 +1,5 @@
 # Quantum Cryptanalysis of Simplified AES (S-AES)
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
-![Qiskit](https://img.shields.io/badge/Qiskit-Aer-6929C4?logo=ibm)
-![D-Wave](https://img.shields.io/badge/D--Wave-Neal%20%7C%20dimod-00AEEF)
-![Platform](https://img.shields.io/badge/Attacks-SAT%20%7C%20VQA%20%7C%20Annealing%20%7C%20Grover-lightgrey)
 
 > This repository presents a unified quantum cryptanalysis pipeline for Simplified AES (S-AES) using three different strategies. The project encodes the full S-AES encryption function (key schedule, SubBytes, ShiftRows, MixColumns, AddRoundKey) as a Boolean SAT formula using Massacci–Marraro minimized prime implicants, and introduces a DRAW (reachability) weighting scheme that assigns each SAT clause a weight proportional to the number of ciphertext bits it influences. 
 
@@ -31,7 +27,7 @@ This repository studies the key-recovery problem on Simplified AES (S-AES) throu
 | Module | Strategy | Core Method |
 |---|---|---|
 | `SAT_formulation/` | Classical SAT cryptanalysis | Massacci-Marraro CNF encoding + DRAW reachability weighting |
-| `VQA/` | Variational Quantum Algorithm | CWMC ansatz optimized with CMA-ES on Qiskit Aer |
+| `VQA/` | Variational Quantum Algorithm | draw ansatz optimized with CMA-ES on Qiskit Aer |
 | `dc_guided_annealing/` | Hybrid quantum-classical annealing | Differential Cryptanalysis (DC) biased QUBO + neal SA |
 | `two_phase_grovers/` | Quantum Amplitude Amplification | Two-phase QAA with DRAW-split oracles (Oracle A / Oracle B) |
 
@@ -117,7 +113,7 @@ python two_phase_grovers/two_phase_grovers.py
 python two_phase_grovers/gate_depth_analysis_new.py
 
 # Run the Variational Quantum Algorithm cost minimization
-python VQA/cwmc_qoc_vqa.py --pt 0xFFFF --key 0xA73B
+python VQA/draw_vqa.py --pt 0xFFFF --key 0xA73B
 
 # Run simulated annealing guided by differential cryptanalysis
 python dc_guided_annealing/dc_annealing.py
