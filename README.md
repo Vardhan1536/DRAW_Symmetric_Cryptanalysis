@@ -54,8 +54,8 @@ w(clause_i) = |{ ciphertext bits reachable from vars(clause_i) }|
 | SubBytes (S-Box) | Massacci–Marraro minimized prime implicants [[1]](#references) | 23 clauses per 4-bit S-Box, lengths 3–5 |
 | AddRoundKey / XOR | Exhaustive 2^k parity clauses | Exact linear encoding |
 | ShiftRows | Variable re-indexing only | No new clauses needed |
-| Key Schedule | XOR + S-Box clauses | Highest DRAW weight (avg 14.25, median 16.0) — [see detailed encoding →](SAT_formulation/ENCODING.md#key-schedule-encoding) |
-| MixColumns | GF(2⁴) mult-by-4 encoded as XOR clauses | Triggers the weight jump: Round 1 max leaps to 16.0 vs Round 2 max of 1.0 — [see detailed encoding →](SAT_formulation/ENCODING.md#mixcolumns-encoding) |
+| Key Schedule | XOR + S-Box clauses | Highest DRAW weight (avg 14.25, median 16.0) — [see detailed encoding →](SAT_formulation/Encoding.md#key-schedule-encoding) |
+| MixColumns | GF(2⁴) mult-by-4 encoded as XOR clauses | Triggers the weight jump: Round 1 max leaps to 16.0 vs Round 2 max of 1.0 — [see detailed encoding →](SAT_formulation/Encoding.md#mixcolumns-encoding) |
 | Boundary (PT/CT) | Unit clauses locking observed bits | Weight 1.0 — isolated, no diffusion |
 
 ---
@@ -146,15 +146,3 @@ python SAT_formulation/landscape_metrics.py 0x6F6B 0x0738 -k 0xA73B
 ## References
 
 **[1]** F. Massacci and L. Marraro (2000). *Logical Cryptanalysis as a SAT Problem: Encoding and Analysis of DES.* Journal of Automated Reasoning, 24(1–2), 165–203. [DOI:10.1023/A:1006326723002](https://doi.org/10.1023/A:1006326723002)
-
-**[2]** T. Jones and S. Forrest (1995). *Fitness Distance Correlation as a Measure of Problem Difficulty for Genetic Algorithms.* Proceedings of ICGA.
-
-**[3]** K. Malan and A. Engelbrecht (2013). *A Survey of Techniques for Characterising Fitness Landscapes and Some Possible Ways Forward.* Information Sciences, 241, 148–163.
-
-**[4]** N. Courtois and J. Pieprzyk (2002). *Cryptanalysis of Block Ciphers with Overdefined Systems of Equations.* ASIACRYPT 2002. [arXiv:cs/0210044](https://arxiv.org/abs/cs/0210044)
-
-**[5]** E. Farhi, J. Goldstone, and S. Gutmann (2014). *A Quantum Approximate Optimization Algorithm.* [arXiv:1411.4028](https://arxiv.org/abs/1411.4028)
-
-**[6]** L. K. Grover (1996). *A Fast Quantum Mechanical Algorithm for Database Search.* Proceedings of STOC 1996. [DOI:10.1145/237814.237866](https://doi.org/10.1145/237814.237866)
-
-**[7]** G. Brassard, P. Høyer, M. Mosca, and A. Tapp (2002). *Quantum Amplitude Amplification and Estimation.* AMS Contemporary Mathematics, 305. [arXiv:quant-ph/0005055](https://arxiv.org/abs/quant-ph/0005055)
