@@ -1,4 +1,4 @@
-# Quantum-Classical Cryptanalysis of Simplified AES (S-AES)
+# Quantum Cryptanalysis of Simplified AES (S-AES)
 
 > This repository presents a unified quantum-classical cryptanalysis pipeline targeting Simplified AES (S-AES) — a 16-bit block cipher with a 16-bit master key space of 65,536 candidates. The project encodes the full S-AES encryption function (key schedule, SubBytes, ShiftRows, MixColumns, AddRoundKey) as a Boolean SAT formula using Massacci–Marraro minimized prime implicants, and introduces a DRAW (reachability) weighting scheme that assigns each SAT clause a weight proportional to the number of ciphertext bits it influences. 
 ---
