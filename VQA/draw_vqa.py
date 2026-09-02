@@ -21,14 +21,10 @@ if args.pt is not None and args.ct is not None:
     if len(args.pt) != len(args.ct):
         raise ValueError("Number of PTs must match number of CTs")
     PAIRS_N = list(zip(args.pt, args.ct))
-    # Update scaling_study.PAIRS so run_landscape uses the provided pairs
     scaling_study.PAIRS = PAIRS_N
 else:
-    PAIRS_N = PAIRS[:2]  # 2 pairs: unique global minimum for K*
+    PAIRS_N = PAIRS[:2]  
 
-# -----------------------------------------------------------------------------
-# 1. BUILD LANDSCAPE + STRUCTURAL DATA  (from actual compiler, no LUTs)
-# -----------------------------------------------------------------------------
 
 def build_landscape():
     import multiprocessing as mp
@@ -39,7 +35,6 @@ def build_landscape():
     print(f"[1] Building CWMC4 landscape: {n_pairs} pairs, {n_cpu} CPU cores...")
     t0 = time.time()
 
-    # run_landscape uses mp.Pool across all cores -- fast parallel execution
     df = run_landscape(num_pairs=n_pairs)
 
     E = df['E_CWMC4'].values.astype(np.float64)
@@ -50,7 +45,6 @@ def build_landscape():
     near_opt    = (E <= 5.0)
     near_keys   = np.where(near_opt)[0]
 
-    # Influence: per-bit error correlation with valley
     influence = np.zeros(N)
     for q in range(N):
         key_bit  = (K_OPT >> q) & 1
@@ -65,7 +59,6 @@ def build_landscape():
                        0.6011, 0.3755, 2.0471, 0.5519])
     mixer_w = CMA_W / (CMA_W.max() + 1e-12)
 
-    # Top-30 synergy edges: joint bit-error in valley (E<=10)
     pair_scores = {}
     for u in range(N):
         for v in range(u + 1, N):
@@ -89,9 +82,6 @@ def build_landscape():
 
 
 
-# -----------------------------------------------------------------------------
-# 2. BUILD PARAMETRIC ANSATZ  (p=8, RXX synergy, explicit ZZ+Z cost)
-# -----------------------------------------------------------------------------
 
 def build_ansatz(influence, mixer_w, synergy_edges, p=P, measure=False):
     """
@@ -144,19 +134,14 @@ def build_ansatz(influence, mixer_w, synergy_edges, p=P, measure=False):
     return qc, beta, alpha, gamma, delta
 
 
-# -----------------------------------------------------------------------------
-# 3. STATEVECTOR ENGINE  -- transpile ONCE, rebind each call
-#    (critical: avoids ~800 expensive transpile calls during CMA-ES)
-# -----------------------------------------------------------------------------
 
-_backend       = None   # initialized in init_engine (after multiprocessing is done)
+_backend       = None  
 _qc_transpiled = None
 _beta_pv = _alpha_pv = _gamma_pv = _delta_pv = None
 _p_global = P
 
 def init_engine(influence, mixer_w, synergy_edges, p=P):
     global _qc_transpiled, _beta_pv, _alpha_pv, _gamma_pv, _delta_pv, _p_global, _backend
-    # Deferred Qiskit import -- safe after multiprocessing.Pool has closed
     from qiskit import QuantumCircuit, transpile
     from qiskit_aer import AerSimulator
 
@@ -173,7 +158,6 @@ def init_engine(influence, mixer_w, synergy_edges, p=P):
     _gamma_pv = g_pv
     _delta_pv = d_pv
 
-    # save_statevector instruction for AerSimulator
     qc_sv = qc_param.copy()
     qc_sv.save_statevector()
 
@@ -198,9 +182,7 @@ def statevector_probs(params: np.ndarray) -> np.ndarray:
     return np.abs(np.array(sv))**2
 
 
-# -----------------------------------------------------------------------------
-# 4. OBJECTIVE FUNCTIONS
-# -----------------------------------------------------------------------------
+
 
 _E_array = _E_le1 = _E_le5 = _E_le10 = None
 _eval_count = [0]
@@ -251,9 +233,6 @@ def obj_v3(params):
     return -pk
 
 
-# -----------------------------------------------------------------------------
-# 5. CMA-ES RUNNER  (research-calibrated: popsize=32, restarts built-in)
-# -----------------------------------------------------------------------------
 
 def run_cmaes(objective, x0, sigma0, maxiter, label, lo=0.0, hi=np.pi):
     n_params = len(x0)
@@ -266,7 +245,7 @@ def run_cmaes(objective, x0, sigma0, maxiter, label, lo=0.0, hi=np.pi):
 
     opts = {
         'maxiter':  maxiter,
-        'popsize':  48,         # research: 3x minimum for robust global search
+        'popsize':  48,         
         'bounds':   [[lo]*n_params, [hi]*n_params],
         'tolx':     1e-5,
         'tolfun':   1e-7,
@@ -308,12 +287,11 @@ def main():
     baseline = statevector_probs(np.zeros(4 * P))
     print(f"  Baseline P(K*) = {baseline[K_OPT]:.4e}  (uniform = {1/N_KEYS:.4e})")
 
-    # -- V1: Valley Concentration (p=8, research-informed x0) -----------------
-    # Adiabatic-inspired: mixer strong early (high beta), cost weak early (low delta)
-    betas  = np.linspace(1.4, 0.2, P)   # stronger early mixer (adiabatic)
-    alphas = np.full(P, 0.15)            # slightly lower influence
-    gammas = np.full(P, 0.25)            # modest entanglement
-    deltas = np.linspace(0.05, 1.3, P)  # slower cost ramp (adiabatic)
+   
+    betas  = np.linspace(1.4, 0.2, P)  
+    alphas = np.full(P, 0.15)           
+    gammas = np.full(P, 0.25)            
+    deltas = np.linspace(0.05, 1.3, P)  
     x0_v1  = np.concatenate([betas, alphas, gammas, deltas])
 
     params_v1, best_v1 = run_cmaes(
@@ -326,7 +304,7 @@ def main():
           f"P(E<=5)={np.dot(probs_v1, _E_le5):.5f}  "
           f"P(K*)={probs_v1[K_OPT]:.3e}")
 
-    # -- V2: Near-Ground Sharpening --------------------------------------------
+   
     params_v2, best_v2 = run_cmaes(
         obj_v2, params_v1, sigma0=0.15, maxiter=120,
         label="V2 -- CVaR Sharpening: P(E<=1)+0.2*P(E<=5)+0.1*P(E<=10)",
@@ -337,7 +315,6 @@ def main():
           f"P(E<=5)={np.dot(probs_v2, _E_le5):.5f}  "
           f"P(K*)={probs_v2[K_OPT]:.3e}")
 
-    # -- V3: Direct Key Recovery -----------------------------------------------
     params_v3, best_v3 = run_cmaes(
         obj_v3, params_v2, sigma0=0.05, maxiter=200,
         label="V3 -- Maximize P(K*)  [Direct Key Recovery]",
@@ -354,7 +331,6 @@ def main():
     print(f"  gamma = {np.round(params_v3[2*P:3*P], 4)}")
     print(f"  delta = {np.round(params_v3[3*P:4*P], 4)}")
 
-    # -- Final Shot-Based Verification on AerSimulator -------------------------
     print(f"\n{'='*66}")
     print(f"  FINAL VERIFICATION -- 16384 shots on AerSimulator")
     print(f"{'='*66}")
@@ -370,7 +346,7 @@ def main():
         pm[d_pv[l]] = float(params_v3[3*P + l])
     qc_bound = qc_final.assign_parameters(pm)
 
-    shot_be = _backend   # reuse same AerSimulator instance from init_engine
+    shot_be = _backend   
     from qiskit import transpile
     qc_t    = transpile(qc_bound, shot_be, optimization_level=1)
     counts  = shot_be.run(qc_t, shots=16384).result().get_counts()
