@@ -9,7 +9,8 @@ This repository contains the official implementation of the DRAW framework appli
 This module implements a Two-Phase Grover's search approach that compiles the classical cryptography into weighted SAT clauses (WCNF). It splits the physical quantum search into heavy and light constraints to optimize hardware resources.
 
 - **`two_phase_grovers/two_phase_grovers.py`**: The unified script that dynamically calculates surviving keys and optimal iteration counts via mathematically exact classical Boolean validation. *(Note: We explicitly bypass the Qiskit Aer simulator because executing a 51+ qubit uncompressed oracle would exceed memory limits and crash. Instead, this script uses mathematically exact classical Boolean validation to scale the evaluation.)*
-- **`two_phase_grovers/gate_depth_analysis_new.py`**: A theoretical analysis script that explicitly constructs physical quantum circuits and uses Qiskit's compiler to extract the logical circuit depths and gate counts for forward pass only.
+- **`two_phase_grovers/gate_depth_analysis.py`**: A theoretical analysis script that explicitly constructs physical quantum circuits and uses Qiskit's compiler to extract the logical circuit depths and gate counts for forward pass only.
+- **`two_phase_grovers/verify_oracles.py`**: This is verification script that checks whether the implementation of the Oracles is faithful with the SAT clauses. It checks all 65,536 keys through the transpiled physical circuits to confirm that the Oracle A correctly identifies surviving keys exactly as the classical SAT formula.
 - **`two_phase_grovers/Reversible_Circuit/`**: Contains the quantum reversible circuit components for S-AES (like the IO-based S-Box and MixColumns) and hardware execution scripts.
 
 **How to Run:**
