@@ -46,7 +46,7 @@ This module implements the DRAW-VQA framework, a physics-informed ansatz optimiz
 
 **How to Run:**
 ```bash
-python VQA/draw_vqa.py --pt 0xE445 --key 0x3AB6
+python draw_vqa.py -p 20 --k-opt 0x1234 --pt 0x6F6B 0xABCD --ct 0x0738 0x8BC9
 ```
 
 ---
