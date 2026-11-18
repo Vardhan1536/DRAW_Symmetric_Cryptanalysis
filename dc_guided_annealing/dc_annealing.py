@@ -218,71 +218,287 @@ def build_dc_biased_bqm(bqm, key_var_ids, preferred_bits, bias_scale=0.5):
 
 def build_biased_states(bqm, cw_lists, key_var_ids, preferred, W,
                          num_reads=200, flip_prob_scale=0.4, seed=42):
+    rng = random.Random(seed)import time
+import random
+import copy
+import numpy as np
+import dimod
+import neal
+from itertools import product as iproduct
+from collections import defaultdict
+
+
+
+_SBOX_NP  = np.array(SBOX_LUT,     dtype=np.int64)
+_INV_SBOX = np.array(INV_SBOX_LUT, dtype=np.int64)
+
+def _mult4_val(n: int) -> int:
+    iv = [(n >> (3 - i)) & 1 for i in range(4)]
+    ov = [iv[2], iv[3] ^ iv[0], iv[0] ^ iv[1], iv[1]]
+    return sum(ov[i] << (3 - i) for i in range(4))
+
+_MULT4 = np.array([_mult4_val(n) for n in range(16)], dtype=np.int64)
+
+
+
+def _pt_from_compiler(comp):
+    return comp._pt_given
+
+def build_consistent_state(bqm, key_int, cw_lists, key_var_ids):
+    key_vars_sorted = sorted(key_var_ids)
+    bqm_vars_set    = set(bqm.variables)
+    state = {}
+    for i, kv in enumerate(key_vars_sorted):
+        state[f'k{kv}'] = (key_int >> (15 - i)) & 1
+    for pair_idx, (comp, _) in enumerate(cw_lists):
+        pt_int = _pt_from_compiler(comp)
+        asgn   = comp.forward_solve(pt_int, key_int)
+        for var_id, val in asgn.items():
+            if var_id not in key_var_ids:
+                qname = f'p{pair_idx}_v{var_id}'
+                if qname in bqm_vars_set:
+                    state[qname] = val
+    for av in bqm.variables:
+        if av not in state:
+            val = 1
+            for p in str(av).split('*'):
+                val &= state.get(p, 0)
+            state[av] = val
+    return state
+
+def compute_qubo_energy_for_key(bqm, key_int, cw_lists, key_var_ids):
+    state = build_consistent_state(bqm, key_int, cw_lists, key_var_ids)
+    e = bqm.offset
+    for v in bqm.variables:
+        e += bqm.get_linear(v) * state.get(v, 0)
+    for (u, v2), coef in bqm.quadratic.items():
+        e += coef * state.get(u, 0) * state.get(v2, 0)
+    return e
+
+def decode_key(sample, key_var_ids):
+    key_int = 0
+    for i, kv in enumerate(sorted(key_var_ids)):
+        if sample.get(f'k{kv}', 0):
+            key_int |= 1 << (15 - i)
+    return key_int
+
+def verify_key(key_int, pt_ct_pairs):
+    return all(encrypt(pt, key_int) == ct for pt, ct in pt_ct_pairs)
+
+
+
+def build_ddt() -> np.ndarray:
+    """DDT[di][do] = #{x : S(x)^S(x^di) == do}."""
+    ddt = np.zeros((16, 16), dtype=np.int32)
+    for x in range(16):
+        for di in range(16):
+            ddt[di][_SBOX_NP[x] ^ _SBOX_NP[x ^ di]] += 1
+    return ddt
+
+DDT = build_ddt()
+
+def high_prob_trails(threshold=4):
+    return [(di, do, int(DDT[di][do]))
+            for di in range(1, 16) for do in range(1, 16)
+            if DDT[di][do] >= threshold]
+
+
+
+_DC_COLS = [
+    {'pt_nib': 0, 'ct_pos': (0, 3)},   
+    {'pt_nib': 1, 'ct_pos': (1, 2)},   
+]
+_DELTA_INS = (1, 2, 3, 4, 8)
+
+def _score_k2_col(ct_a, ct_b, delta_pt, oracle):
+   
+    pts1 = np.arange(65536, dtype=np.int64)
+    pts2 = pts1 ^ delta_pt
+
+    cts1 = np.array([oracle(int(p)) for p in pts1], dtype=np.int64)
+    cts2 = np.array([oracle(int(p)) for p in pts2], dtype=np.int64)
+
+    ct1a = (cts1 >> (12 - 4 * ct_a)) & 0xF
+    ct1b = (cts1 >> (12 - 4 * ct_b)) & 0xF
+    ct2a = (cts2 >> (12 - 4 * ct_a)) & 0xF
+    ct2b = (cts2 >> (12 - 4 * ct_b)) & 0xF
+
+    scores = np.zeros((16, 16), dtype=np.float64)
+    for k2a in range(16):
+        dx          = _INV_SBOX[ct1a ^ k2a] ^ _INV_SBOX[ct2a ^ k2a]
+        expected_dy = _MULT4[dx]
+        for k2b in range(16):
+            dy = _INV_SBOX[ct1b ^ k2b] ^ _INV_SBOX[ct2b ^ k2b]
+            scores[k2a, k2b] = np.sum(dy == expected_dy)
+    return scores
+
+def _best_col_scores(col, oracle):
+    """Try several delta_in values; keep the most discriminating score matrix."""
+    ct_a, ct_b = col['ct_pos']
+    best, best_ratio = None, -1.0
+    best_delta = None
+    for di in _DELTA_INS:
+        delta_pt = di << (12 - 4 * col['pt_nib'])
+        sc  = _score_k2_col(ct_a, ct_b, delta_pt, oracle)
+        r   = float(sc.max() / (sc.sum() + 1e-9))
+        if r > best_ratio:
+            best, best_ratio, best_delta = sc, r, di
+    return best, best_ratio, best_delta
+
+def _inv_key_schedule(k2: np.ndarray) -> np.ndarray:
+    """
+    Closed-form S-AES key-schedule inverse K2 -> K0 (master key).
+    Bijective over all 65536 keys.  No oracle calls; pure algebra.
+    """
+    def _rot(w): return ((w & 0xF) << 4) | ((w >> 4) & 0xF)
+    def _sub(w): return (_SBOX_NP[(w >> 4) & 0xF] << 4) | _SBOX_NP[w & 0xF]
+
+    w4 = (k2 >> 8) & 0xFF;  w5 = k2 & 0xFF
+    w3 = w4 ^ w5
+    w2 = w4 ^ 0x30 ^ _sub(_rot(w3))
+    w1 = w2 ^ w3
+    w0 = w2 ^ 0x80 ^ _sub(_rot(w1))
+    return (w0 << 8) | w1
+
+def run_dc_attack(oracle):
+    
+    t0 = time.time()
+    sc0, r0, d0 = _best_col_scores(_DC_COLS[0], oracle)
+    sc1, r1, d1 = _best_col_scores(_DC_COLS[1], oracle)
+
+    
+    k2  = np.arange(65536, dtype=np.int64)
+    n0  = (k2 >> 12) & 0xF;  n3 = k2 & 0xF
+    n1  = (k2 >>  8) & 0xF;  n2 = (k2 >> 4) & 0xF
+
+    s0  = sc0[n0, n3] + 1e-3
+    s1  = sc1[n1, n2] + 1e-3
+    raw = (s0 * s1) ** 4          
+    k2_probs = raw / raw.sum()
+
+    
+    k0 = _inv_key_schedule(k2)   
+    probs = np.zeros(65536, dtype=np.float64)
+    np.add.at(probs, k0, k2_probs)
+
+    
+    keys = np.arange(65536, dtype=np.int64)
+    preferred = np.array([float(np.sum(probs * ((keys >> (15 - b)) & 1)))
+                          for b in range(16)])
+
+   
+    p       = np.clip(preferred, 1e-9, 1 - 1e-9)
+    entropy = -(p * np.log2(p) + (1 - p) * np.log2(1 - p))   # in [0,1]
+    W       = entropy / (np.linalg.norm(entropy) + 1e-12)
+
+    col_info = {
+        'col0': {'delta_in': d0, 'peak_ratio': r0, 'total': float(sc0.sum())},
+        'col1': {'delta_in': d1, 'peak_ratio': r1, 'total': float(sc1.sum())},
+        'elapsed': time.time() - t0,
+    }
+    return preferred, W, col_info
+
+
+
+def build_dc_biased_bqm(bqm, key_var_ids, preferred, dc_bias_scale=0.5):
+
+    biased = bqm.copy()
+    key_vars_sorted = sorted(key_var_ids)
+
+    for b, kv in enumerate(key_vars_sorted):
+        var_name = f'k{kv}'
+        if var_name not in biased.variables:
+            continue
+        p   = float(np.clip(preferred[b], 0.01, 0.99))
+        logit = np.log(p / (1.0 - p))
+        h   = -dc_bias_scale * logit          # negative -> favours x=1 when p>0.5
+        biased.add_linear(var_name, h)
+
+    return biased
+
+
+
+def build_biased_states(bqm, cw_lists, key_var_ids,
+                        preferred, W,
+                        num_reads=200, flip_prob_scale=1.0, seed=42):
+    """
+    Builds `num_reads` BQM-consistent initial states.
+    Each key bit is sampled from Bernoulli(preferred[b]),
+    then randomly flipped with probability W[b]*flip_prob_scale.
+    Bits where DC is certain (low W) are rarely flipped.
+    Bits where DC is uncertain (high W) are flipped more.
+    """
     rng = random.Random(seed)
-    n_key = len(key_var_ids)
     states = []
     for _ in range(num_reads):
         key_cand = 0
-        for i in range(n_key):
-            pref = preferred[i]
-            flip_p = min(max(float(W[i]) * flip_prob_scale, 0.0), 0.5)
-            base_bit = 1 if rng.random() < pref else 0
-            bit = (1 - base_bit) if rng.random() < flip_p else base_bit
-            key_cand |= bit << (15 - i)
+        for b in range(16):
+            base = 1 if rng.random() < preferred[b] else 0
+            fp   = min(max(float(W[b]) * flip_prob_scale, 0.0), 0.45)
+            bit  = (1 - base) if rng.random() < fp else base
+            key_cand |= bit << (15 - b)
         states.append(build_consistent_state(bqm, key_cand, cw_lists, key_var_ids))
     return states
 
+
+
 def parse_and_report(response, key_var_ids, true_key, pt_ct_pairs,
-                     elapsed, strategy_name, bqm=None, cw_lists=None):
-    raw_results = []
+                     elapsed, strategy_name, bqm, cw_lists):
+    """
+    Deduplicates by decoded key, recomputes consistent QUBO energy for each
+    unique key (aux vars rebuilt deterministically via forward_solve), and
+    ranks by that energy — not SA's raw energy which depends on aux-var state.
+    """
+    best_raw = {}
     for sample, energy, _ in response.data(['sample', 'energy', 'num_occurrences']):
-        key_int = decode_key(sample, key_var_ids)
-        raw_results.append((energy, key_int))
+        k = decode_key(sample, key_var_ids)
+        if k not in best_raw or energy < best_raw[k]:
+            best_raw[k] = energy
 
-    best_raw_e = {}
-    for e, k in raw_results:
-        if k not in best_raw_e or e < best_raw_e[k]:
-            best_raw_e[k] = e
-
-    rerank = (bqm is not None and cw_lists is not None)
     results = []
-    for k, e_sa in best_raw_e.items():
-        hd = bin(k ^ true_key).count('1')
-        ok = verify_key(k, pt_ct_pairs)
-        if rerank:
-            e_cons = compute_qubo_energy_for_key(bqm, k, cw_lists, key_var_ids)
-        else:
-            e_cons = e_sa
+    for k, e_sa in best_raw.items():
+        e_cons = compute_qubo_energy_for_key(bqm, k, cw_lists, key_var_ids)
+        hd     = bin(k ^ true_key).count('1')
+        ok     = verify_key(k, pt_ct_pairs)
         results.append((e_cons, e_sa, k, hd, ok))
-
     results.sort(key=lambda r: (r[0], r[1]))
+
     found = any(k == true_key for _, _, k, _, _ in results)
-    best_e_cons, best_e_sa, best_k, best_hd, best_ok = results[0]
+    n_reads = sum(1 for _ in response.data(['sample']))
 
-    print(f"\n    Time    : {elapsed:.1f}s  |  Reads: {len(raw_results)}  |  Unique keys: {len(results)}")
-    if rerank:
-        print(f"    Top-5 unique keys (re-ranked by consistent QUBO energy):")
-        print(f"      {'#':>2}  {'Key':>6}  {'E_cons':>10}  {'E_sa':>10}  HD")
-        for rank, (e_cons, e_sa, k, hd, ok) in enumerate(results[:5], start=1):
-            tag = " <<< TRUE KEY" if k == true_key else (" <<< DECRYPTS OK" if ok else "")
-            print(f"      {rank:2d}  0x{k:04X}  {e_cons:10.3f}  {e_sa:10.3f}  {hd}{tag}")
+    print(f"\n    Time: {elapsed:.1f}s | Reads: {n_reads} | Unique keys: {len(results)}")
+    print(f"    {'#':>2}  {'Key':>6}  {'E_cons':>8}  {'E_sa':>8}  HD")
+    for rank, (ec, es, k, hd, ok) in enumerate(results[:10], 1):
+        tag = " <<< TRUE KEY" if k == true_key else (" <<< DECRYPTS OK" if ok else "")
+        print(f"    {rank:2d}  0x{k:04X}  {ec:8.3f}  {es:8.3f}  {hd}{tag}")
 
-    true_rank = next((r for r, (_, _, k, _, _) in enumerate(results, start=1) if k == true_key), None)
     if found:
-        print(f"\n    [{strategy_name}] RESULT: TRUE KEY FOUND 0x{true_key:04X} (rank #{true_rank}/{len(results)})")
+        true_rank = next(r for r, (_, _, k, _, _) in enumerate(results, 1) if k == true_key)
+        true_ec   = next(ec for ec, _, k, _, _ in results if k == true_key)
+        print(f"\n    [{strategy_name}]  TRUE KEY FOUND  0x{true_key:04X}"
+              f"  rank #{true_rank}/{len(results)}  E_cons={true_ec:.3f}"
+              f"  {'*** RANK 1 ***' if true_rank == 1 else ''}")
     else:
-        print(f"\n    [{strategy_name}] RESULT: NOT FOUND (best=0x{best_k:04X} HD={best_hd})")
+        best_ec, _, best_k, best_hd, _ = results[0]
+        print(f"\n    [{strategy_name}]  NOT FOUND  "
+              f"best=0x{best_k:04X}  HD={best_hd}  E_cons={best_ec:.3f}")
 
+    true_rank = (next(r for r, (_, _, k, _, _) in enumerate(results, 1)
+                      if k == true_key) if found else None)
     return {
-        'strategy': strategy_name,
-        'found': found,
-        'best_key': best_k,
-        'best_energy': best_e_cons,
-        'hd': best_hd,
-        'elapsed': elapsed,
-        'true_rank': true_rank,
-        'rank1': (found and true_rank == 1),
+        'strategy'  : strategy_name,
+        'found'     : found,
+        'rank1'     : (found and true_rank == 1),
+        'true_rank' : true_rank,
+        'best_key'  : results[0][2],
+        'best_energy': results[0][0],
+        'hd'        : results[0][3],
+        'elapsed'   : elapsed,
+        'results'   : results,
     }
+
+
+
 
 def strategy_1_dc_biased_annealing(bqm, key_var_ids, cw_lists,
                                     true_key, pt_ct_pairs, oracle,
@@ -292,26 +508,45 @@ def strategy_1_dc_biased_annealing(bqm, key_var_ids, cw_lists,
                                     num_sweeps_pure=70_000,
                                     beta_range=(1.0, 50.0),
                                     beta_mid=15.0):
-    print(f"\n{'-'*70}")
-    print(f"  Strategy 1: DC-Biased Annealing (Two-Phase Anneal)")
-    print(f"  Phase 1: DC-biased BQM  |  Phase 2: Pure QUBO")
-    print(f"{'='*70}")
+    print(f"\n{'─'*70}")
+    print(f"  Strategy 1: Two-Phase DC-Biased Annealing")
+    print(f"  Phase 1: DC-biased BQM  (sweeps={num_sweeps_dc}, beta 1->{beta_mid})")
+    print(f"  Phase 2: Pure QUBO      (sweeps={num_sweeps_pure}, beta {beta_mid}->{beta_range[1]})")
+    print(f"  DC bias scale = {dc_bias_scale}  (logit-scaled linear terms on key vars)")
+    print(f"{'─'*70}")
 
-    print(f"\n    [DC] Running coupled K2-column attack...", end=' ', flush=True)
-    t0 = time.time()
+    
+    print(f"\n    [DC] Running coupled K2-column attack on full codebook...")
     preferred, W, col_info = run_dc_attack(oracle)
-    print(f"done in {time.time()-t0:.2f}s")
-    print(f"      W={np.round(W, 3)}")
-    print(f"      Preferred={np.round(preferred, 3)}")
+    print(f"      done in {col_info['elapsed']:.2f}s")
+    print(f"      Col0 (K2 nibs 0,3): delta_in=0x{col_info['col0']['delta_in']:X}  "
+          f"peak_ratio={col_info['col0']['peak_ratio']:.3f}")
+    print(f"      Col1 (K2 nibs 1,2): delta_in=0x{col_info['col1']['delta_in']:X}  "
+          f"peak_ratio={col_info['col1']['peak_ratio']:.3f}")
+    print(f"      W         : {np.round(W, 3)}")
+    print(f"      Preferred : {np.round(preferred, 3)}")
 
+    
     biased_bqm = build_dc_biased_bqm(bqm, key_var_ids, preferred, dc_bias_scale)
+
+    
+    e_true_pure   = compute_qubo_energy_for_key(bqm,        true_key, cw_lists, key_var_ids)
+    e_true_biased = compute_qubo_energy_for_key(biased_bqm, true_key, cw_lists, key_var_ids)
+    print(f"\n      True key E_pure={e_true_pure:.3f}  E_biased={e_true_biased:.3f}"
+          f"  (DC bias shift={e_true_biased-e_true_pure:+.3f})")
+
+    
+    print(f"\n    Building {num_reads} DC-biased initial states...", end=' ', flush=True)
+    t0 = time.time()
     init_states = build_biased_states(
         bqm, cw_lists, key_var_ids, preferred, W,
-        num_reads=num_reads, flip_prob_scale=0.4, seed=42
+        num_reads=num_reads, flip_prob_scale=0.3, seed=42
     )
+    print(f"done in {time.time()-t0:.1f}s")
 
     sampler = neal.SimulatedAnnealingSampler()
 
+    
     print(f"\n    [Phase 1] Annealing on DC-biased BQM...", end=' ', flush=True)
     t0 = time.time()
     resp1 = sampler.sample(
@@ -324,8 +559,12 @@ def strategy_1_dc_biased_annealing(bqm, key_var_ids, cw_lists,
     )
     print(f"done in {time.time()-t0:.1f}s")
 
-    phase2_init = [dict(sample) for sample, _, _ in resp1.data(['sample', 'energy', 'num_occurrences'])]
+    
+    phase2_init = []
+    for sample, _, _ in resp1.data(['sample', 'energy', 'num_occurrences']):
+        phase2_init.append(dict(sample))
 
+    
     print(f"    [Phase 2] Annealing on pure QUBO...", end=' ', flush=True)
     t0 = time.time()
     resp2 = sampler.sample(
@@ -342,29 +581,28 @@ def strategy_1_dc_biased_annealing(bqm, key_var_ids, cw_lists,
         resp2, key_var_ids, true_key, pt_ct_pairs,
         t_total, "DC-BiasedAnnealing", bqm, cw_lists
     )
-
-
 def main():
     print("=" * 70)
-    print("  Hybrid QUBO Solver -- DC-Informed Annealing")
-    print("  Coupled Differential Cryptanalysis + Annealing")
+    print("  Hybrid QUBO Solver -- DC-Informed Annealing  (v3)")
+    print("  Two-phase bias injection + iterative K2-consistency re-weighting")
     print("=" * 70)
 
     random.seed(777)
     np.random.seed(777)
 
-    true_key = random.randint(1, 0xFFFF)
+    true_key    = random.randint(1, 0xFFFF)
     pt_ct_pairs = [(random.randint(0, 0xFFFF), None) for _ in range(3)]
     pt_ct_pairs = [(pt, encrypt(pt, true_key)) for pt, _ in pt_ct_pairs]
-    oracle = lambda pt: encrypt(int(pt), true_key)
+    oracle      = lambda pt: encrypt(int(pt), true_key)
 
     print(f"\n  True Key  : 0x{true_key:04X}")
     for pt, ct in pt_ct_pairs:
         print(f"    0x{pt:04X}  ->  0x{ct:04X}")
 
-    print(f"\n{'-'*70}")
+   
+    print(f"\n{'─'*70}")
     print("  Compiling Hybrid QUBO...")
-    print(f"{'='*70}")
+    print(f"{'─'*70}")
     t0 = time.time()
     bqm, stats, cw_lists, key_var_ids = compile_hybrid_qubo(pt_ct_pairs)
     print(f"  Compiled in {time.time()-t0:.1f}s  |  Variables: {stats['total_bqm_vars']}")
@@ -372,9 +610,12 @@ def main():
     e_true = compute_qubo_energy_for_key(bqm, true_key, cw_lists, key_var_ids)
     print(f"  True key QUBO energy: {e_true:.4f}  (expected 0.0)")
 
+    
     trails = high_prob_trails(threshold=4)
-    print(f"\n  DDT: {len(trails)} trails with count>=4")
+    print(f"\n  DDT: {len(trails)} trails with count>=4 "
+          f"(all uniform at prob=0.25 for this S-box)")
 
+    
     print(f"\n{'='*70}")
     print("  SOLVING")
     print(f"{'='*70}")
@@ -388,18 +629,22 @@ def main():
     )
     summary.append(r1)
 
-
-
+    
     print(f"\n{'='*70}")
     print("  FINAL SUMMARY")
     print(f"{'='*70}")
     print(f"  True key: 0x{true_key:04X}\n")
     print(f"  {'Strategy':<30}  {'Status':>12}  {'Best Key':>8}  {'HD':>4}  {'E_cons':>10}")
-    print(f"  {'-'*30}  {'-'*12}  {'-'*8}  {'-'*4}  {'-'*10}")
+    print(f"  {'─'*30}  {'─'*12}  {'─'*8}  {'─'*4}  {'─'*10}")
     for r in summary:
-        status = "RANK 1 ***" if r['rank1'] else (f"rank #{r['true_rank']}" if r['found'] else "not found")
-        print(f"  {r['strategy']:<30}  {status:>12}  0x{r['best_key']:04X}      {r['hd']:>4}  {r['best_energy']:>10.3f}")
+        if r['rank1']:
+            status = "RANK 1 ***"
+        elif r['found']:
+            status = f"rank #{r['true_rank']}"
+        else:
+            status = "not found"
+        print(f"  {r['strategy']:<30}  {status:>12}  0x{r['best_key']:04X}  "
+              f"    {r['hd']:>4}  {r['best_energy']:>10.3f}")
     print()
-
 if __name__ == "__main__":
     main()
